@@ -1,1 +1,50 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Qo'l sehri</title>
+<style>
+  :root { --bg:#05060d; --fg:#d9ffc2; --lime:#b6ff3c; --muted:#7f8aa3; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg);
+    font-family:system-ui,-apple-system,"Segoe UI",sans-serif; overflow:hidden; }
+  canvas { position:fixed; inset:0; width:100%; height:100%; display:block; }
+  #cam { position:fixed; right:12px; bottom:12px; width:132px; border-radius:10px;
+    transform:scaleX(-1); opacity:.55; border:1px solid #ffffff22; display:none; }
+  #panel { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center;
+    justify-content:center; gap:14px; text-align:center; padding:24px;
+    background:rgba(5,6,13,.82); backdrop-filter:blur(6px); }
+  button.alt { background:transparent; color:var(--fg); border:1px solid #ffffff44; }
+  #panel h1 { margin:0; font-size:clamp(28px,6vw,48px); font-weight:650; letter-spacing:-.02em; }
+  #panel p { margin:0; max-width:34ch; color:var(--muted); line-height:1.5; }
+  button { font:inherit; font-weight:600; padding:14px 28px; border:0; border-radius:999px;
+    background:var(--lime); color:#0a1400; cursor:pointer; }
+  button:focus-visible { outline:3px solid #fff; outline-offset:3px; }
+  #hud { position:fixed; left:14px; top:12px; font-size:14px; color:var(--muted); display:none; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<video id="cam" playsinline muted></video>
+<div id="hud">Qo'l topilmadi</div>
+<div id="panel">
+  <h1>Qo'l sehri</h1>
+  <p>Kamera oldida qo'lingizni oching va musht qiling. Zarrachalar qo'lingizga ergashadi.</p>
+  <button id="start">Kamerani yoqish</button>
+  <button id="touch" class="alt">Kamerasiz sinash (barmoq bilan)</button>
+  <p id="msg"></p>
+</div>
 
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js" crossorigin="anonymous"></script>
+<script>
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const cam = document.getElementById('cam'), hud = document.getElementById('hud');
+const panel = document.getElementById('panel'), msg = document.getElementById('msg');
+let W, H, DPR;
+function resize(){
+  DPR = Math.min(devicePixelRatio || 1, 2);
+  W = innerWidth; H = innerHeight;
+  cv.width = W*DPR; cv.height = H*DPR; ctx.setTransform(DPR,0,0,DPR,0,0);
+}
+addEventListener('resize', resize); resize();
