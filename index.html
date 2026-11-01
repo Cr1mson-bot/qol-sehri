@@ -109,3 +109,37 @@ function frame(now){
   hud.textContent = hand.seen ? (hand.open>0.55 ? 'Qo\'l ochiq' : 'Musht') : 'Qo\'l topilmadi';
   requestAnimationFrame(frame);
       }
+async function start(){
+  msg.textContent = 'Yuklanmoqda…';
+  try {
+    if (typeof Hands === 'undefined') throw new Error('MediaPipe yuklanmadi. Internetni tekshiring.');
+    const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'user', width:{ideal:1280}, height:{ideal:720}}, audio:false});
+    cam.srcObject = stream; await cam.play(); cam.style.display = 'block';
+    const hands = new Hands({locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${f}`});
+    hands.setOptions({maxNumHands:1, modelComplexity:1, minDetectionConfidence:0.4, minTrackingConfidence:0.35});
+    hands.onResults(onResults);
+    panel.style.display = 'none'; hud.style.display = 'block';
+    let busy = false;
+    (async function loop(){
+      if (!busy && cam.readyState >= 2){ busy = true; try { await hands.send({image:cam}); } catch(e){} busy = false; }
+      requestAnimationFrame(loop);
+    })();
+  } catch(e){
+    msg.textContent = 'Xato: ' + (e.message || e);
+  }
+}
+const ptr = {on:false, down:false, x:innerWidth/2, y:innerHeight/2};
+document.getElementById('start').addEventListener('click', start);
+document.getElementById('touch').addEventListener('click', () => {
+  ptr.on = true; panel.style.display = 'none';
+});
+cv.style.touchAction = 'none';
+addEventListener('load', () => start());
+cv.addEventListener('pointerdown', e => { ptr.down = true; ptr.x = e.clientX; ptr.y = e.clientY; });
+cv.addEventListener('pointermove', e => { ptr.x = e.clientX; ptr.y = e.clientY; });
+addEventListener('pointerup', () => { ptr.down = false; });
+addEventListener('pointercancel', () => { ptr.down = false; });
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
