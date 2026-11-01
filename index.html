@@ -14,13 +14,12 @@
     transform:scaleX(-1); opacity:.55; border:1px solid #ffffff22; display:none; }
   #panel { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center;
     justify-content:center; gap:14px; text-align:center; padding:24px;
-    background:rgba(5,6,13,.82); backdrop-filter:blur(6px); }
+    background:rgba(5,6,13,.82); }
   button.alt { background:transparent; color:var(--fg); border:1px solid #ffffff44; }
-  #panel h1 { margin:0; font-size:clamp(28px,6vw,48px); font-weight:650; letter-spacing:-.02em; }
+  #panel h1 { margin:0; font-size:clamp(28px,6vw,48px); font-weight:650; }
   #panel p { margin:0; max-width:34ch; color:var(--muted); line-height:1.5; }
   button { font:inherit; font-weight:600; padding:14px 28px; border:0; border-radius:999px;
     background:var(--lime); color:#0a1400; cursor:pointer; }
-  button:focus-visible { outline:3px solid #fff; outline-offset:3px; }
   #hud { position:fixed; left:14px; top:12px; font-size:14px; color:var(--muted); display:none; }
 </style>
 </head>
@@ -30,100 +29,120 @@
 <div id="hud">Qo'l topilmadi</div>
 <div id="panel">
   <h1>Qo'l sehri</h1>
-  <p>Kamera oldida qo'lingizni oching va musht qiling. Zarrachalar qo'lingizga ergashadi.</p>
+  <p>Ochiq kaft, musht yoki chimdim qiling. Zarrachalar qo'lingizga ergashadi.</p>
   <button id="start">Kamerani yoqish</button>
   <button id="touch" class="alt">Kamerasiz sinash (barmoq bilan)</button>
   <p id="msg"></p>
 </div>
-
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js" crossorigin="anonymous"></script>
 <script>
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 const cam = document.getElementById('cam'), hud = document.getElementById('hud');
 const panel = document.getElementById('panel'), msg = document.getElementById('msg');
-let W, H, DPR;
+let W, H;
 function resize(){
-  DPR = Math.min(devicePixelRatio || 1, 2);
   W = innerWidth; H = innerHeight;
-  cv.width = W*DPR; cv.height = H*DPR; ctx.setTransform(DPR,0,0,DPR,0,0);
+  cv.width = W; cv.height = H;
 }
 addEventListener('resize', resize); resize();
-const N = innerWidth < 600 ? 1400 : 2600;
-const P = Array.from({length:N}, (_, i) => ({
-  x: Math.random()*W, y: Math.random()*H, vx:0, vy:0,
-  a: Math.random()*Math.PI*2,
-  ring: 0.72 + 0.28*Math.floor(Math.random()*4)/3 + Math.random()*0.05,
-  spread: Math.random(),
-  hue: 70 + Math.random()*55
-}));
-const hand = { seen:false, x:W/2, y:H/2, open:0.5, tx:W/2, ty:H/2, topen:0.5, last:0 };
+const N = innerWidth < 600 ? 1200 : 2200;
+const px = new Float32Array(N), py = new Float32Array(N), vx = new Float32Array(N), vy = new Float32Array(N);
+const pa = new Float32Array(N), ps = new Float32Array(N), pj = new Float32Array(N);
+for (let i = 0; i < N; i++){
+  px[i] = Math.random()*W; py[i] = Math.random()*H;
+  pa[i] = Math.random()*6.2832; ps[i] = Math.random(); pj[i] = Math.random()-0.5;
+}
+const COLORS = ['hsla(75,100%,55%,.55)','hsla(90,100%,55%,.55)','hsla(105,100%,55%,.55)','hsla(120,95%,58%,.55)','hsla(135,90%,60%,.55)'];
+const NAMES = {open:'Ochiq kaft', fist:'Musht', pinch:'Chimdim'};
+let act = N, lastG = '';
+const hand = {seen:false, x:W/2, y:H/2, tx:W/2, ty:H/2, last:0, g:'fist'};
+const w = {open:0, fist:1, pinch:0};
 const d = (a,b) => Math.hypot(a.x-b.x, a.y-b.y);
+
 function onResults(r){
   const lm = r.multiHandLandmarks && r.multiHandLandmarks[0];
   if (!lm){ hand.seen = false; return; }
   const pc = [0,5,9,13,17].reduce((s,i)=>({x:s.x+lm[i].x/5, y:s.y+lm[i].y/5}), {x:0,y:0});
   const palm = d(lm[0], lm[9]) || 0.1;
-  const tips = [4,8,12,16,20].reduce((s,i)=>s+d(lm[i], pc), 0)/5;
-  const ratio = tips/palm;
-  hand.topen = Math.min(1, Math.max(0, (ratio-1.0)/0.8));
+  const r3 = [12,16,20].reduce((s,i)=>s+d(lm[i],pc), 0)/3/palm;
+  const pinch = d(lm[4], lm[8])/palm;
+  if ((hand.g === 'pinch' ? pinch < 0.5 : pinch < 0.3) && r3 > 1.3) hand.g = 'pinch';
+  else if (r3 > 1.55) hand.g = 'open';
+  else if (r3 < 1.2) hand.g = 'fist';
+  else if (hand.g === 'pinch') hand.g = r3 > 1.4 ? 'open' : 'fist';
   const GAIN = 2.0;
   const nx = Math.min(1, Math.max(0, 0.5 + (pc.x-0.5)*GAIN));
   const ny = Math.min(1, Math.max(0, 0.5 + (pc.y-0.5)*GAIN));
   hand.tx = (1-nx)*W; hand.ty = ny*H;
   hand.seen = true; hand.last = performance.now();
-}
-let t0 = performance.now();
+} 
+let t0 = performance.now(), acc = 0, fc = 0;
 function frame(now){
-  const dt = Math.min(0.033, (now-t0)/1000); t0 = now;
-  hand.x += (hand.tx-hand.x)*0.45; hand.y += (hand.ty-hand.y)*0.45;
-  hand.open += (hand.topen-hand.open)*0.25;
-  if (!hand.seen){
-    if (ptr.on){ hand.tx = ptr.x; hand.ty = ptr.y; hand.topen = ptr.down ? 0 : 1; }
-    else { hand.tx = W/2; hand.ty = H/2; hand.topen = 0.5; }
+  const rdt = (now-t0)/1000, dt = Math.min(0.033, rdt); t0 = now;
+  acc += rdt;
+  if (++fc === 30){
+    const avg = acc/30;
+    if (avg > 0.026 && act > 500) act = Math.max(500, Math.floor(act*0.85));
+    else if (avg < 0.019 && act < N) act = Math.min(N, Math.floor(act*1.1)+1);
+    acc = 0; fc = 0;
   }
+  if (hand.seen && now-hand.last > 1200) hand.seen = false;
+  let g = hand.g;
+  if (!hand.seen){
+    if (ptr.on){ hand.tx = ptr.x; hand.ty = ptr.y; g = ptr.down ? 'fist' : 'open'; }
+    else { hand.tx = W/2; hand.ty = H/2; g = 'fist'; }
+  }
+  for (const k in w) w[k] += ((g === k ? 1 : 0) - w[k])*0.18;
+  hand.x += (hand.tx-hand.x)*0.5; hand.y += (hand.ty-hand.y)*0.5;
+  if (g !== lastG){ hud.textContent = NAMES[g]; lastG = g; }
   hud.style.visibility = (ptr.on && !hand.seen) ? 'hidden' : 'visible';
-  const cx = hand.x, cy = hand.y, o = hand.open;
-  const base = Math.min(W,H);
-  const R = base*(0.16 + 0.04*(1-o));
-  const spin = (0.6 + 1.6*(1-o))*now/1000;
+
+  const cx = hand.x, cy = hand.y, base = Math.min(W,H), spin = now/1000;
   ctx.globalCompositeOperation = 'source-over';
-  ctx.fillStyle = 'rgba(5,6,13,0.22)';
-  ctx.fillRect(0,0,W,H);
+  ctx.fillStyle = 'rgba(5,6,13,0.25)';
+  ctx.fillRect(0, 0, W, H);
   ctx.globalCompositeOperation = 'lighter';
   ctx.lineWidth = 1.6; ctx.lineCap = 'round';
-  for (const p of P){
-    const ang = p.a + spin*(p.ring>0.9?-1:1);
-    const rr = R*p.ring*(1-o) + (base*(0.12 + 0.5*p.spread) + Math.sin(now/400+p.a*5)*14)*o;
-    const tx = cx + Math.cos(ang)*rr, ty = cy + Math.sin(ang)*rr;
-    const k = 7 + 7*(1-o);
-    p.vx += (tx-p.x)*k*dt; p.vy += (ty-p.y)*k*dt;
-    p.vx *= 0.86; p.vy *= 0.86;
-    p.x += p.vx; p.y += p.vy;
-    const sp = Math.hypot(p.vx,p.vy);
-    const len = Math.min(9, 2 + sp*0.7);
-    const ux = sp>0.01 ? p.vx/sp : 1, uy = sp>0.01 ? p.vy/sp : 0;
-    ctx.strokeStyle = `hsla(${p.hue},100%,${46+Math.min(12,sp*1.5)}%,${0.3+Math.min(0.3,sp*0.04)})`;
-    ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(p.x+ux*len, p.y+uy*len); ctx.stroke();
+
+  for (let b = 0; b < 5; b++){
+    ctx.beginPath();
+    for (let i = b; i < act; i += 5){
+      const s = ps[i], fr = Math.sqrt(s), a = pa[i];
+      const arm = Math.floor(a/6.2832*3)*2.0944;
+      const ga = arm + fr*3.4 + spin*0.6 + pj[i]*0.35, gr = base*0.30*fr;
+      const sa = a + spin*(i&1 ? -0.4 : 0.4), sr = base*(0.12+0.5*s) + Math.sin(now/400+a*5)*14;
+      const ba = a*3 + spin*1.5, br = base*0.07*(0.6+0.4*Math.sin(a*7+s*9));
+      const tx = cx + Math.cos(ga)*gr*w.fist + Math.cos(sa)*sr*w.open + Math.cos(ba)*br*w.pinch;
+      const ty = cy + Math.sin(ga)*gr*0.8*w.fist + Math.sin(sa)*sr*w.open + Math.sin(ba)*br*w.pinch;
+      vx[i] += (tx-px[i])*10*dt; vy[i] += (ty-py[i])*10*dt;
+      vx[i] *= 0.86; vy[i] *= 0.86;
+      px[i] += vx[i]; py[i] += vy[i];
+      const sp = Math.hypot(vx[i], vy[i]), len = Math.min(9, 2+sp*0.7);
+      const ux = sp > 0.01 ? vx[i]/sp : 1, uy = sp > 0.01 ? vy[i]/sp : 0;
+      ctx.moveTo(px[i], py[i]); ctx.lineTo(px[i]+ux*len, py[i]+uy*len);
+    }
+    ctx.strokeStyle = COLORS[b];
+    ctx.stroke();
   }
-  if (hand.seen && now-hand.last>1200) hand.seen = false;
-  hud.textContent = hand.seen ? (hand.open>0.55 ? 'Qo\'l ochiq' : 'Musht') : 'Qo\'l topilmadi';
   requestAnimationFrame(frame);
-      }
+}
+
 async function start(){
   msg.textContent = 'Yuklanmoqda…';
   try {
     if (typeof Hands === 'undefined') throw new Error('MediaPipe yuklanmadi. Internetni tekshiring.');
-    const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'user', width:{ideal:1280}, height:{ideal:720}}, audio:false});
+    const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'user', width:{ideal:640}, height:{ideal:480}}, audio:false});
     cam.srcObject = stream; await cam.play(); cam.style.display = 'block';
     const hands = new Hands({locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${f}`});
-    hands.setOptions({maxNumHands:1, modelComplexity:1, minDetectionConfidence:0.4, minTrackingConfidence:0.35});
+    hands.setOptions({maxNumHands:1, modelComplexity:0, minDetectionConfidence:0.4, minTrackingConfidence:0.35});
     hands.onResults(onResults);
     panel.style.display = 'none'; hud.style.display = 'block';
     let busy = false;
-    (async function loop(){
+    const tick = async () => {
       if (!busy && cam.readyState >= 2){ busy = true; try { await hands.send({image:cam}); } catch(e){} busy = false; }
-      requestAnimationFrame(loop);
-    })();
+      if (cam.requestVideoFrameCallback) cam.requestVideoFrameCallback(tick); else requestAnimationFrame(tick);
+    };
+    tick();
   } catch(e){
     msg.textContent = 'Xato: ' + (e.message || e);
   }
