@@ -72,3 +72,40 @@ function onResults(r){
   hand.tx = (1-nx)*W; hand.ty = ny*H;
   hand.seen = true; hand.last = performance.now();
 }
+let t0 = performance.now();
+function frame(now){
+  const dt = Math.min(0.033, (now-t0)/1000); t0 = now;
+  hand.x += (hand.tx-hand.x)*0.45; hand.y += (hand.ty-hand.y)*0.45;
+  hand.open += (hand.topen-hand.open)*0.25;
+  if (!hand.seen){
+    if (ptr.on){ hand.tx = ptr.x; hand.ty = ptr.y; hand.topen = ptr.down ? 0 : 1; }
+    else { hand.tx = W/2; hand.ty = H/2; hand.topen = 0.5; }
+  }
+  hud.style.visibility = (ptr.on && !hand.seen) ? 'hidden' : 'visible';
+  const cx = hand.x, cy = hand.y, o = hand.open;
+  const base = Math.min(W,H);
+  const R = base*(0.16 + 0.04*(1-o));
+  const spin = (0.6 + 1.6*(1-o))*now/1000;
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = 'rgba(5,6,13,0.22)';
+  ctx.fillRect(0,0,W,H);
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.lineWidth = 1.6; ctx.lineCap = 'round';
+  for (const p of P){
+    const ang = p.a + spin*(p.ring>0.9?-1:1);
+    const rr = R*p.ring*(1-o) + (base*(0.12 + 0.5*p.spread) + Math.sin(now/400+p.a*5)*14)*o;
+    const tx = cx + Math.cos(ang)*rr, ty = cy + Math.sin(ang)*rr;
+    const k = 7 + 7*(1-o);
+    p.vx += (tx-p.x)*k*dt; p.vy += (ty-p.y)*k*dt;
+    p.vx *= 0.86; p.vy *= 0.86;
+    p.x += p.vx; p.y += p.vy;
+    const sp = Math.hypot(p.vx,p.vy);
+    const len = Math.min(9, 2 + sp*0.7);
+    const ux = sp>0.01 ? p.vx/sp : 1, uy = sp>0.01 ? p.vy/sp : 0;
+    ctx.strokeStyle = `hsla(${p.hue},100%,${46+Math.min(12,sp*1.5)}%,${0.3+Math.min(0.3,sp*0.04)})`;
+    ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(p.x+ux*len, p.y+uy*len); ctx.stroke();
+  }
+  if (hand.seen && now-hand.last>1200) hand.seen = false;
+  hud.textContent = hand.seen ? (hand.open>0.55 ? 'Qo\'l ochiq' : 'Musht') : 'Qo\'l topilmadi';
+  requestAnimationFrame(frame);
+      }
