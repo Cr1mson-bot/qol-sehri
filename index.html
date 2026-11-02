@@ -450,6 +450,156 @@ frame = function(now){
   ctx.setTransform(DQ, 0, 0, DQ, 0, 0);
   requestAnimationFrame(frame);
 };
+function workerMain(){
+  let cv, ctx, W = 1, H = 1, DP = 1, N = 400, act = 400;
+  let px, py, vx, vy, pa, ps, pj, pang, pz, SPR = [];
+  const w = {open:0, fist:1, pinch:0, peace:0, point:0};
+  const hand = {seen:false, x:0, y:0, tx:0, ty:0, g:'fist', last:0};
+  const ptr = {on:false, down:false, x:0, y:0};
+  let t0 = 0, acc = 0, fc = 0;
+  function mk(p){
+    const c = new OffscreenCanvas(96, 96), g = c.getContext('2d'); g.translate(48, 48);
+    g.shadowColor = p.b; g.shadowBlur = 14;
+    const gr = g.createLinearGradient(-22, 0, 30, 0);
+    gr.addColorStop(0, p.c); gr.addColorStop(0.55, p.b); gr.addColorStop(1, p.a);
+    g.beginPath(); g.moveTo(30, 0); g.lineTo(-22, -17); g.lineTo(-10, 0); g.lineTo(-22, 17); g.closePath();
+    g.fillStyle = gr; g.fill();
+    g.shadowBlur = 0; g.lineWidth = 1.6; g.strokeStyle = p.a; g.stroke();
+    const sp = g.createRadialGradient(30, 0, 0, 30, 0, 16);
+    sp.addColorStop(0, 'rgba(255,255,255,.95)'); sp.addColorStop(0.35, 'rgba(160,220,255,.5)'); sp.addColorStop(1, 'rgba(80,140,255,0)');
+    g.fillStyle = sp; g.fillRect(14, -16, 32, 32);
+    return c;
+  }
+  function init(m){
+    cv = m.canvas; W = m.W; H = m.H; DP = m.DP; N = m.N; act = N;
+    cv.width = Math.round(W*DP); cv.height = Math.round(H*DP);
+    ctx = cv.getContext('2d');
+    px = new Float32Array(N); py = new Float32Array(N); vx = new Float32Array(N); vy = new Float32Array(N);
+    pa = new Float32Array(N); ps = new Float32Array(N); pj = new Float32Array(N); pang = new Float32Array(N); pz = new Float32Array(N);
+    for (let i = 0; i < N; i++){
+      px[i] = Math.random()*W; py[i] = Math.random()*H;
+      pa[i] = Math.random()*6.2832; ps[i] = Math.random(); pj[i] = Math.random()-0.5; pz[i] = Math.random();
+    }
+    SPR = [
+      mk({a:'#8fd8ff', b:'#1f5cff', c:'#0a1a6e'}),
+      mk({a:'#b5ecff', b:'#2f86ff', c:'#0b2a8a'}),
+      mk({a:'#7aaeff', b:'#1738d6', c:'#07124f'})
+    ];
+    hand.x = hand.tx = W/2; hand.y = hand.ty = H/2;
+    t0 = performance.now();
+    tick();
+  }
+  self.onmessage = e => {
+    const m = e.data;
+    if (m.t === 'init') init(m);
+    else if (m.t === 'hand'){ hand.tx = m.tx; hand.ty = m.ty; hand.g = m.g; hand.seen = m.seen; hand.last = performance.now(); }
+    else if (m.t === 'ptr') Object.assign(ptr, m.p);
+    else if (m.t === 'size' && cv){ W = m.W; H = m.H; cv.width = Math.round(W*DP); cv.height = Math.round(H*DP); }
+  };
+  function tick(){
+    frame();
+    if (self.requestAnimationFrame) self.requestAnimationFrame(tick); else setTimeout(tick, 16);
+  }
+  function frame(){
+    const now = performance.now();
+    const rdt = (now-t0)/1000, dt = Math.min(0.033, rdt); t0 = now;
+    acc += rdt;
+    if (++fc === 30){
+      const avg = acc/30;
+      if (avg > 0.026 && act > 150) act = Math.max(150, Math.floor(act*0.9));
+      else if (avg < 0.019 && act < N) act = Math.min(N, Math.floor(act*1.06)+1);
+      acc = 0; fc = 0;
+    }
+    if (hand.seen && now-hand.last > 1200) hand.seen = false;
+    let g = hand.g;
+    if (!hand.seen){
+      if (ptr.on){ hand.tx = ptr.x; hand.ty = ptr.y; g = ptr.down ? 'fist' : 'open'; }
+      else { hand.tx = W/2; hand.ty = H/2; g = 'fist'; }
+    }
+    for (const k in w) w[k] += ((g === k ? 1 : 0) - w[k])*0.2;
+    hand.x += (hand.tx-hand.x)*0.5; hand.y += (hand.ty-hand.y)*0.5;
+    const cx = hand.x, cy = hand.y, base = Math.min(W,H), spin = now/1000;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = 'rgba(2,4,14,0.2)';
+    ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.setTransform(DP, 0, 0, DP, 0, 0);
+    ctx.beginPath();
+    for (let i = 0; i < act; i++){
+      const s = ps[i], a = pa[i], fr = Math.sqrt(s);
+      let ox = 0, oy = 0, f;
+      if ((f = w.fist) > 0.01){
+        const arm = Math.floor(a/6.2832*3)*2.0944, ga = arm + fr*3.4 + spin*0.6 + pj[i]*0.35, gr = base*0.30*fr;
+        ox += Math.cos(ga)*gr*f; oy += Math.sin(ga)*gr*0.8*f;
+      }
+      if ((f = w.open) > 0.01){
+        const sa = a + spin*(i&1 ? -0.4 : 0.4), sr = base*(0.12+0.5*s) + Math.sin(now/400+a*5)*14;
+        ox += Math.cos(sa)*sr*f; oy += Math.sin(sa)*sr*f;
+      }
+      if ((f = w.pinch) > 0.01){
+        const ba = a*3 + spin*1.5, br = base*0.07*(0.6+0.4*Math.sin(a*7+s*9));
+        ox += Math.cos(ba)*br*f; oy += Math.sin(ba)*br*f;
+      }
+      if ((f = w.peace) > 0.01){
+        const sn = Math.sin(a), hx = 16*sn*sn*sn;
+        const hy = -(13*Math.cos(a) - 5*Math.cos(2*a) - 2*Math.cos(3*a) - Math.cos(4*a));
+        const hs = base*0.011*(1+0.06*Math.sin(now/180))*(0.35+0.65*s);
+        ox += hx*hs*f; oy += hy*hs*f;
+      }
+      if ((f = w.point) > 0.01){
+        const qa = a*5 + spin*5, qr = base*0.035*(0.3+fr);
+        ox += Math.cos(qa)*qr*f; oy += Math.sin(qa)*qr*f;
+      }
+      vx[i] += (cx+ox-px[i])*10*dt; vy[i] += (cy+oy-py[i])*10*dt;
+      vx[i] *= 0.86; vy[i] *= 0.86;
+      px[i] += vx[i]; py[i] += vy[i];
+      const sp = Math.hypot(vx[i], vy[i]);
+      if (sp > 0.4) pang[i] = Math.atan2(vy[i], vx[i]);
+      const tl = Math.min(28, 4 + sp*2.4);
+      ctx.moveTo(px[i], py[i]); ctx.lineTo(px[i]-Math.cos(pang[i])*tl, py[i]-Math.sin(pang[i])*tl);
+    }
+    ctx.globalCompositeOperation = 'lighter'; ctx.lineCap = 'round';
+    ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(40,100,255,.35)'; ctx.stroke();
+    ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(170,220,255,.6)'; ctx.stroke();
+    ctx.globalCompositeOperation = 'source-over';
+    for (let i = 0; i < act; i++){
+      const k = (14 + 14*pz[i])/52, c = Math.cos(pang[i])*k*DP, s2 = Math.sin(pang[i])*k*DP;
+      ctx.setTransform(c, s2, -s2, c, px[i]*DP, py[i]*DP);
+      ctx.drawImage(SPR[i%3], -48, -48);
+    }
+    ctx.setTransform(DP, 0, 0, DP, 0, 0);
+  }
+}
+(function(){
+  let c2 = null;
+  try {
+    if (!window.Worker || typeof OffscreenCanvas === 'undefined' || !HTMLCanvasElement.prototype.transferControlToOffscreen) return;
+    const blob = new Blob(['(' + workerMain.toString() + ')()'], {type:'text/javascript'});
+    const wk = new Worker(URL.createObjectURL(blob));
+    const DPR = Math.min(devicePixelRatio || 1, 1.5);
+    c2 = document.createElement('canvas');
+    c2.style.touchAction = 'none';
+    document.body.prepend(c2);
+    const off = c2.transferControlToOffscreen();
+    wk.postMessage({t:'init', canvas:off, W:innerWidth, H:innerHeight, DP:DPR, N:innerWidth < 600 ? 400 : 700}, [off]);
+    frame = function(){};
+    cv.remove();
+    const baseRes = onResults;
+    onResults = function(r){
+      baseRes(r);
+      wk.postMessage({t:'hand', tx:hand.tx, ty:hand.ty, g:hand.g, seen:hand.seen});
+      hud.textContent = hand.seen ? NAMES[hand.g] : "Qo'l topilmadi";
+    };
+    addEventListener('resize', () => wk.postMessage({t:'size', W:innerWidth, H:innerHeight}));
+    document.getElementById('touch').addEventListener('click', () => {
+      wk.postMessage({t:'ptr', p:{on:true}}); hud.style.visibility = 'hidden';
+    });
+    c2.addEventListener('pointerdown', e => wk.postMessage({t:'ptr', p:{down:true, x:e.clientX, y:e.clientY}}));
+    c2.addEventListener('pointermove', e => wk.postMessage({t:'ptr', p:{x:e.clientX, y:e.clientY}}));
+    addEventListener('pointerup', () => wk.postMessage({t:'ptr', p:{down:false}}));
+    addEventListener('pointercancel', () => wk.postMessage({t:'ptr', p:{down:false}}));
+  } catch(err){ if (c2) c2.remove(); }
+})();
 </script>
 </body>
 </html>
