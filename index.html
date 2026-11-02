@@ -169,3 +169,93 @@ function workerMain(){
     ctx.setTransform(DP, 0, 0, DP, 0, 0);
   }
 }
+const cam = document.getElementById('cam'), hud = document.getElementById('hud');
+const panel = document.getElementById('panel'), msg = document.getElementById('msg');
+const DPR = Math.min(devicePixelRatio || 1, 2);
+let cvs = document.createElement('canvas');
+document.body.prepend(cvs);
+let send = () => {};
+function startRender(){
+  const code = '(' + workerMain.toString() + ')()';
+  const init = {t:'init', W:innerWidth, H:innerHeight, DP:DPR, N:innerWidth < 600 ? 36 : 60};
+  try {
+    if (window.Worker && typeof OffscreenCanvas !== 'undefined' && cvs.transferControlToOffscreen){
+      const off = cvs.transferControlToOffscreen();
+      const wk = new Worker(URL.createObjectURL(new Blob([code], {type:'text/javascript'})));
+      init.canvas = off; wk.postMessage(init, [off]);
+      send = m => wk.postMessage(m);
+      return;
+    }
+  } catch(e){ cvs.remove(); cvs = document.createElement('canvas'); document.body.prepend(cvs); }
+  const fake = {onmessage:null, requestAnimationFrame:f => requestAnimationFrame(f)};
+  new Function('self', code)(fake);
+  init.canvas = cvs; fake.onmessage({data:init});
+  send = m => fake.onmessage({data:m});
+}
+startRender();
+addEventListener('resize', () => send({t:'size', W:innerWidth, H:innerHeight}));
+cvs.addEventListener('pointerdown', e => send({t:'ptr', p:{down:true, x:e.clientX, y:e.clientY}}));
+cvs.addEventListener('pointermove', e => send({t:'ptr', p:{x:e.clientX, y:e.clientY}}));
+addEventListener('pointerup', () => send({t:'ptr', p:{down:false}}));
+addEventListener('pointercancel', () => send({t:'ptr', p:{down:false}}));
+
+const NAMES = {open:'Ochiq kaft', fist:'Musht', pinch:'Chimdim', peace:'Tinchlik: yurak', point:"Ko'rsatkich"};
+let cur = 'fist', cand = '', candN = 0, shown = '';
+function setHud(t){ if (t !== shown){ hud.textContent = t; shown = t; } }
+function onResults(r){
+  const lm = r.multiHandLandmarks && r.multiHandLandmarks[0];
+  if (!lm){ send({t:'hand', seen:false}); setHud("Qo'l topilmadi"); return; }
+  const ar = (cam.videoWidth/cam.videoHeight) || 1.33;
+  const d = (a, b) => Math.hypot((a.x-b.x)*ar, a.y-b.y);
+  const palm = d(lm[0], lm[9]) || 0.1;
+  const ext = (t, p) => d(lm[t], lm[0]) > d(lm[p], lm[0])*1.1;
+  const ix = ext(8,6), md = ext(12,10), rg = ext(16,14), pk = ext(20,18);
+  const n = ix + md + rg + pk, pinch = d(lm[4], lm[8])/palm;
+  let raw = null;
+  if ((cur === 'pinch' ? pinch < 0.5 : pinch < 0.3) && md && rg && pk) raw = 'pinch';
+  else if (ix && md && !rg && !pk) raw = 'peace';
+  else if (ix && !md && !rg && !pk) raw = 'point';
+  else if (n >= 3) raw = 'open';
+  else if (n === 0) raw = 'fist';
+  if (raw && raw !== cur){
+    if (raw === cand){ if (++candN >= 2){ cur = raw; cand = ''; candN = 0; } }
+    else { cand = raw; candN = 1; }
+  } else { cand = ''; candN = 0; }
+  const pc = cur === 'point' ? lm[8] : [0,5,9,13,17].reduce((s,i) => ({x:s.x+lm[i].x/5, y:s.y+lm[i].y/5}), {x:0, y:0});
+  const GAIN = 2.0;
+  const nx = Math.min(1, Math.max(0, 0.5 + (pc.x-0.5)*GAIN));
+  const ny = Math.min(1, Math.max(0, 0.5 + (pc.y-0.5)*GAIN));
+  send({t:'hand', tx:(1-nx)*innerWidth, ty:ny*innerHeight, g:cur, seen:true});
+  setHud(NAMES[cur]);
+}
+let started = false;
+async function start(){
+  if (started) return;
+  started = true; msg.textContent = 'Yuklanmoqda…';
+  try {
+    if (typeof Hands === 'undefined') throw new Error('MediaPipe yuklanmadi. Internetni tekshiring.');
+    const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'user', width:{ideal:960}, height:{ideal:540}}, audio:false});
+    cam.srcObject = stream; await cam.play(); cam.style.display = 'block';
+    const hands = new Hands({locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${f}`});
+    hands.setOptions({maxNumHands:1, modelComplexity:0, minDetectionConfidence:0.35, minTrackingConfidence:0.35});
+    hands.onResults(onResults);
+    panel.style.display = 'none'; hud.style.display = 'block';
+    let busy = false;
+    const next = () => cam.requestVideoFrameCallback ? cam.requestVideoFrameCallback(tick) : requestAnimationFrame(tick);
+    async function tick(){
+      if (!busy && cam.readyState >= 2){ busy = true; try { await hands.send({image:cam}); } catch(e){} busy = false; }
+      next();
+    }
+    tick();
+  } catch(e){
+    started = false; msg.textContent = 'Xato: ' + (e.message || e);
+  }
+}
+document.getElementById('start').addEventListener('click', start);
+document.getElementById('touch').addEventListener('click', () => {
+  send({t:'ptr', p:{on:true}}); panel.style.display = 'none';
+});
+addEventListener('load', start);
+</script>
+</body>
+</html>
