@@ -169,6 +169,16 @@ if (cam.requestVideoFrameCallback){
     if (n-lastRun < 70) cam.requestVideoFrameCallback(cb); else { lastRun = n; cb(t); }
   });
 }
+act = innerWidth < 600 ? 700 : 1400;
+function lowRes(){ cv.width = W/2; cv.height = H/2; ctx.setTransform(0.5,0,0,0.5,0,0); }
+lowRes(); addEventListener('resize', lowRes);
+if (cam.requestVideoFrameCallback){
+  const rvfc = cam.requestVideoFrameCallback.bind(cam); let lastRun = 0;
+  cam.requestVideoFrameCallback = cb => rvfc(t => {
+    const n = performance.now();
+    if (n-lastRun < 70) cam.requestVideoFrameCallback(cb); else { lastRun = n; cb(t); }
+  });
+}
 </script>
 </body>
 </html>
